@@ -5,11 +5,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import asyncio
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timedelta
 from src.models.database import get_session, Match
 
-class OpenDotaUpdater:
-    BASE_URL = "https://api.opendota.com/api"
+class MatchUpdater:
+    BASE_URL = "https://api.stratz.com/api/v1"
     
     def __init__(self):
         self.session = None
@@ -21,113 +21,67 @@ class OpenDotaUpdater:
     async def __aexit__(self, *args):
         await self.session.close()
     
-    async def get_pro_matches(self, limit: int = 100):
-        """Получает последние профессиональные матчи"""
-        url = f"{self.BASE_URL}/proMatches"
-        async with self.session.get(url) as resp:
+    async def get_pro_matches(self):
+        """Получает последние про-матчи через STRATZ"""
+        # Берём матчи за последние 7 дней
+        url = f"{self.BASE_URL}/match/public"
+        headers = {"Accept": "application/json"}
+        
+        async with self.session.get(url, headers=headers) as resp:
             if resp.status == 200:
-                return await resp.json()
-            print(f"❌ Ошибка API: {resp.status}")
-            return []
-    
-    async def get_live_matches(self):
-        """Получает текущие live-матчи"""
-        url = f"{self.BASE_URL}/live"
-        async with self.session.get(url) as resp:
-            if resp.status == 200:
-                return await resp.json()
+                data = await resp.json()
+                return data[:50]  # Первые 50 матчей
+            print(f"❌ Ошибка STRATZ API: {resp.status}")
             return []
     
     async def update_database(self):
-        """Обновляет базу данных свежими матчами"""
-        print("📡 Запрашиваю матчи из OpenDota API...")
+        print("📡 Запрашиваю матчи из STRATZ API...")
         
-        # Получаем про-матчи
-        pro_matches = await self.get_pro_matches(limit=50)
+        matches = await self.get_pro_matches()
         
-        # Получаем live-матчи
-        live_matches = await self.get_live_matches()
+        if not matches:
+            print("❌ Не удалось получить матчи")
+            return 0, 0
         
         session = get_session()
         added = 0
-        updated = 0
         
-        # Обрабатываем про-матчи
-        for match in pro_matches:
-            match_id_str = str(match.get('match_id'))
-            radiant_team = match.get('radiant_team', {}) or {}
-            dire_team = match.get('dire_team', {}) or {}
+        for match in matches:
+            match_id_str = str(match.get('id'))
             
-            team1_name = radiant_team.get('name', 'Radiant')
-            team2_name = dire_team.get('name', 'Dire')
-            
-            # Проверяем, есть ли уже такой матч
+            # Проверяем, есть ли уже
             existing = session.query(Match).filter(
                 Match.match_external_id == match_id_str
             ).first()
             
             if existing:
-                # Обновляем счёт если матч завершён
-                if match.get('radiant_win') is not None:
-                    existing.score_team1 = match.get('radiant_score')
-                    existing.score_team2 = match.get('dire_score')
-                    existing.is_finished = True
-                    existing.is_live = False
-                    updated += 1
-            else:
-                # Добавляем новый матч
-                new_match = Match(
-                    match_external_id=match_id_str,
-                    tournament=match.get('league_name', 'Неизвестный турнир'),
-                    team1_name=team1_name,
-                    team2_name=team2_name,
-                    start_time=datetime.fromtimestamp(match.get('start_time', 0)),
-                    is_finished=bool(match.get('radiant_win') is not None),
-                    score_team1=match.get('radiant_score'),
-                    score_team2=match.get('dire_score'),
-                    team1_odds=None,  # Пока нет парсинга Winline
-                    team2_odds=None
-                )
-                session.add(new_match)
-                added += 1
-        
-        # Обрабатываем live-матчи
-        for match in live_matches:
-            match_id_str = str(match.get('match_id'))
-            radiant_team = match.get('radiant_team', {}) or {}
-            dire_team = match.get('dire_team', {}) or {}
+                continue
             
-            team1_name = radiant_team.get('name', 'Radiant')
-            team2_name = dire_team.get('name', 'Dire')
+            radiant_team = match.get('radiantTeam', {}) or {}
+            dire_team = match.get('direTeam', {}) or {}
+            league = match.get('league', {}) or {}
             
-            existing = session.query(Match).filter(
-                Match.match_external_id == match_id_str
-            ).first()
-            
-            if not existing:
-                new_match = Match(
-                    match_external_id=match_id_str,
-                    tournament=match.get('league_name', 'Live-матч'),
-                    team1_name=team1_name,
-                    team2_name=team2_name,
-                    start_time=datetime.now(),
-                    is_live=True,
-                    is_finished=False
-                )
-                session.add(new_match)
-                added += 1
-            else:
-                existing.is_live = True
-                updated += 1
+            new_match = Match(
+                match_external_id=match_id_str,
+                tournament=league.get('name', 'Неизвестный турнир'),
+                team1_name=radiant_team.get('name', 'Radiant'),
+                team2_name=dire_team.get('name', 'Dire'),
+                start_time=datetime.now() - timedelta(hours=match.get('durationSeconds', 0) / 3600),
+                is_finished=True,
+                score_team1=match.get('radiantKillsTeam', 0),
+                score_team2=match.get('direKillsTeam', 0),
+            )
+            session.add(new_match)
+            added += 1
         
         session.commit()
         session.close()
         
-        print(f"✅ Готово! Добавлено: {added}, Обновлено: {updated}")
-        return added, updated
+        print(f"✅ Готово! Добавлено матчей: {added}")
+        return added, 0
 
 async def main():
-    async with OpenDotaUpdater() as updater:
+    async with MatchUpdater() as updater:
         await updater.update_database()
 
 if __name__ == "__main__":
