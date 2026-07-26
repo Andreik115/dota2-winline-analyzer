@@ -1,5 +1,4 @@
-from fastapi import FastAPI, Request
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pathlib import Path
@@ -10,54 +9,137 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.models.database import get_session, Match
 
-app = FastAPI(
-    title="Dota 2 Winline Analyzer",
-    description="AI-анализ матчей Dota 2 с коэффициентами Winline",
-    version="0.1.0"
-)
+app = FastAPI(title="Dota 2 Winline Analyzer", version="0.1.0")
 
 static_path = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
-templates_path = Path(__file__).parent.parent / "templates"
-templates = Jinja2Templates(directory=str(templates_path))
-
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
+async def home():
     session = get_session()
     matches = session.query(Match).order_by(Match.start_time.desc()).limit(20).all()
     session.close()
     
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "matches": matches,
-            "title": "Dota 2 Winline Analyzer"
-        }
-    )
+    matches_html = ""
+    if matches:
+        for m in matches:
+            matches_html += f"""
+            <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:10px 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-weight:600;font-size:18px;">{m.team1_name}</span>
+                    <span style="font-weight:700;color:#64748b;">VS</span>
+                    <span style="font-weight:600;font-size:18px;">{m.team2_name}</span>
+                </div>
+                <a href="/match/{m.id}" style="display:block;margin-top:12px;padding:10px;background:#3b82f6;color:white;text-align:center;text-decoration:none;border-radius:8px;">Подробный анализ →</a>
+            </div>
+            """
+    else:
+        matches_html = """
+        <div style="background:#1e293b;border-radius:12px;padding:48px;text-align:center;">
+            <div style="font-size:48px;">📭</div>
+            <p style="color:#94a3b8;font-size:18px;">Матчей пока нет</p>
+            <p style="color:#64748b;">Добавьте сбор данных для загрузки матчей</p>
+        </div>
+        """
+    
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dota 2 Winline Analyzer</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="/static/css/style.css">
+    </head>
+    <body>
+        <header>
+            <div class="container">
+                <a href="/" class="logo">🎮 Dota2 Analyzer</a>
+                <nav class="nav-links">
+                    <a href="/">Матчи</a>
+                </nav>
+            </div>
+        </header>
+        <main class="container">
+            <h1 style="font-size:32px;margin-bottom:8px;">🎮 Анализ матчей Dota 2</h1>
+            <p style="color:#94a3b8;margin-bottom:32px;">AI-прогнозы с учётом коэффициентов Winline</p>
+            
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px;">
+                <div class="card">
+                    <div style="color:#94a3b8;font-size:14px;">Матчей сегодня</div>
+                    <div style="font-size:28px;font-weight:700;">0</div>
+                </div>
+                <div class="card">
+                    <div style="color:#94a3b8;font-size:14px;">LIVE прямо сейчас</div>
+                    <div style="font-size:28px;font-weight:700;">0</div>
+                </div>
+                <div class="card">
+                    <div style="color:#94a3b8;font-size:14px;">Value Bets</div>
+                    <div style="font-size:28px;font-weight:700;color:#22c55e;">0</div>
+                </div>
+            </div>
+            
+            <h2 style="font-size:24px;margin-bottom:16px;">📊 Матчи</h2>
+            {matches_html}
+        </main>
+        <footer>
+            <p>Dota 2 Winline Analyzer | Данные: OpenDota API</p>
+        </footer>
+    </body>
+    </html>
+    """
 
 @app.get("/match/{match_id}", response_class=HTMLResponse)
-async def match_detail(request: Request, match_id: int):
+async def match_detail(match_id: int):
     session = get_session()
     match = session.query(Match).filter(Match.id == match_id).first()
     session.close()
     
     if not match:
-        return templates.TemplateResponse(
-            "404.html",
-            {"request": request, "message": "Матч не найден"}
-        )
+        return "<h1>Матч не найден</h1><a href='/'>Назад</a>"
     
-    return templates.TemplateResponse(
-        "match_detail.html",
-        {
-            "request": request,
-            "match": match,
-            "title": f"{match.team1_name} vs {match.team2_name}"
-        }
-    )
+    odds1 = f"Кэф: {match.team1_odds:.2f}" if match.team1_odds else ""
+    odds2 = f"Кэф: {match.team2_odds:.2f}" if match.team2_odds else ""
+    
+    return f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <title>{match.team1_name} vs {match.team2_name}</title>
+        <link href="/static/css/style.css" rel="stylesheet">
+    </head>
+    <body>
+        <header>
+            <div class="container">
+                <a href="/" class="logo">🎮 Dota2 Analyzer</a>
+            </div>
+        </header>
+        <main class="container">
+            <a href="/" style="color:#3b82f6;">← Назад к матчам</a>
+            <div class="card" style="margin:20px 0;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div style="text-align:center;flex:1;">
+                        <div style="font-size:24px;font-weight:700;">{match.team1_name}</div>
+                        <div style="color:#94a3b8;">{odds1}</div>
+                    </div>
+                    <div style="font-size:24px;font-weight:700;">VS</div>
+                    <div style="text-align:center;flex:1;">
+                        <div style="font-size:24px;font-weight:700;">{match.team2_name}</div>
+                        <div style="color:#94a3b8;">{odds2}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="background:linear-gradient(135deg,#1e1b4b,#1e293b);">
+                <h3>🤖 AI Анализ</h3>
+                <p style="color:#94a3b8;">Добавьте GigaChat API ключ для анализа</p>
+            </div>
+        </main>
+    </body>
+    </html>
+    """
 
 @app.get("/api/health")
-async def health_check():
-    return {"status": "ok", "message": "Сервер работает"}
+async def health():
+    return {"status": "ok"}
