@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1 style="font-size: 32px; margin-bottom: 8px;">🎮 Анализ матчей Dota 2</h1>
+<p style="color: #94a3b8; margin-bottom: 32px;">AI-прогнозы с учётом коэффициентов Winline</p>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px;">
+    <div class="card">
+        <div style="color: #94a3b8; font-size: 14px;">Матчей сегодня</div>
+        <div style="font-size: 28px; font-weight: 700; margin-top: 4px;">0</div>
+    </div>
+    <div class="card">
+        <div style="color: #94a3b8; font-size: 14px;">LIVE прямо сейчас</div>
+        <div style="font-size: 28px; font-weight: 700; margin-top: 4px;">0</div>
+    </div>
+    <div class="card">
+        <div style="color: #94a3b8; font-size: 14px;">Найдено Value Bets</div>
+        <div style="font-size: 28px; font-weight: 700; margin-top: 4px; color: #22c55e;">0</div>
+    </div>
+    <div class="card">
+        <div style="color: #94a3b8; font-size: 14px;">Точность модели</div>
+        <div style="font-size: 28px; font-weight: 700; margin-top: 4px;">--%</div>
+    </div>
+</div>
+
+<h2 style="font-size: 24px; margin-bottom: 16px;">📊 Матчи</h2>
+
+{% if matches %}
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px;">
+    {% for match in matches %}
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="text-align: center; flex: 1;">
+                <div style="font-weight: 600; font-size: 18px;">{{ match.team1_name }}</div>
+            </div>
+            <div style="font-size: 20px; font-weight: 700; padding: 0 20px; color: #64748b;">VS</div>
+            <div style="text-align: center; flex: 1;">
+                <div style="font-weight: 600; font-size: 18px;">{{ match.team2_name }}</div>
+            </div>
+        </div>
+        <a href="/match/{{ match.id }}" class="btn" style="display: block; text-align: center;">
+            Подробный анализ →
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align: center; padding: 48px;">
+    <div style="font-size: 48px; margin-bottom: 16px;">📭</div>
+    <p style="color: #94a3b8; font-size: 18px;">Матчей пока нет</p>
+    <p style="color: #64748b; margin-top: 8px;">Запустите сбор данных для загрузки матчей</p>
+</div>
+{% endif %}
+{% endblock %}
