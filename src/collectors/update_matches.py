@@ -1,46 +1,66 @@
-# src/collectors/update_matches.py
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import asyncio
 import aiohttp
-from datetime import datetime, timedelta
+from datetime import datetime
 from src.models.database import get_session, Match
+from src.config import STRATZ_API_KEY
 
 class MatchUpdater:
-    BASE_URL = "https://api.stratz.com/api/v1"
+    BASE_URL = "https://api.stratz.com/graphql"
     
     def __init__(self):
         self.session = None
     
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
+        headers = {
+            "Authorization": f"Bearer {STRATZ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        self.session = aiohttp.ClientSession(headers=headers)
         return self
     
     async def __aexit__(self, *args):
         await self.session.close()
     
     async def get_pro_matches(self):
-        """Получает последние про-матчи через STRATZ"""
-        # Берём матчи за последние 7 дней
-        url = f"{self.BASE_URL}/match/public"
-        headers = {"Accept": "application/json"}
+        query = """
+        query {
+            matches(request: { take: 20, isParsed: true }) {
+                id
+                radiantTeam { name }
+                direTeam { name }
+                league { name }
+                endDateTime
+                radiantKillsTeam
+                direKillsTeam
+            }
+        }
+        """
         
-        async with self.session.get(url, headers=headers) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                return data[:50]  # Первые 50 матчей
-            print(f"❌ Ошибка STRATZ API: {resp.status}")
+        try:
+            async with self.session.post(self.BASE_URL, json={"query": query}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("data", {}).get("matches", [])
+                print(f"❌ Ошибка: {resp.status}")
+                return []
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
             return []
     
     async def update_database(self):
-        print("📡 Запрашиваю матчи из STRATZ API...")
+        print("📡 Запрашиваю матчи из STRATZ...")
+        
+        if not STRATZ_API_KEY:
+            print("❌ Нет ключа STRATZ. Добавь в .env: STRATZ_API_KEY=твой_ключ")
+            return 0, 0
         
         matches = await self.get_pro_matches()
         
         if not matches:
-            print("❌ Не удалось получить матчи")
             return 0, 0
         
         session = get_session()
@@ -49,7 +69,6 @@ class MatchUpdater:
         for match in matches:
             match_id_str = str(match.get('id'))
             
-            # Проверяем, есть ли уже
             existing = session.query(Match).filter(
                 Match.match_external_id == match_id_str
             ).first()
@@ -57,27 +76,26 @@ class MatchUpdater:
             if existing:
                 continue
             
-            radiant_team = match.get('radiantTeam', {}) or {}
-            dire_team = match.get('direTeam', {}) or {}
+            radiant = match.get('radiantTeam', {}) or {}
+            dire = match.get('direTeam', {}) or {}
             league = match.get('league', {}) or {}
             
             new_match = Match(
                 match_external_id=match_id_str,
-                tournament=league.get('name', 'Неизвестный турнир'),
-                team1_name=radiant_team.get('name', 'Radiant'),
-                team2_name=dire_team.get('name', 'Dire'),
-                start_time=datetime.now() - timedelta(hours=match.get('durationSeconds', 0) / 3600),
+                tournament=league.get('name', 'Неизвестно'),
+                team1_name=radiant.get('name', 'Radiant'),
+                team2_name=dire.get('name', 'Dire'),
+                start_time=datetime.fromtimestamp(match.get('endDateTime', 0)) if match.get('endDateTime') else datetime.now(),
                 is_finished=True,
-                score_team1=match.get('radiantKillsTeam', 0),
-                score_team2=match.get('direKillsTeam', 0),
+                score_team1=match.get('radiantKillsTeam'),
+                score_team2=match.get('direKillsTeam'),
             )
             session.add(new_match)
             added += 1
         
         session.commit()
         session.close()
-        
-        print(f"✅ Готово! Добавлено матчей: {added}")
+        print(f"✅ Добавлено: {added}")
         return added, 0
 
 async def main():
