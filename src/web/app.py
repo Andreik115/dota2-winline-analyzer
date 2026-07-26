@@ -8,6 +8,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.models.database import get_session, Match
+from src.ai.gigachat_analyzer import analyzer
 
 app = FastAPI(title="Dota 2 Winline Analyzer", version="0.1.0")
 
@@ -30,7 +31,11 @@ async def home():
                     <span style="font-weight:700;color:#64748b;">VS</span>
                     <span style="font-weight:600;font-size:18px;">{m.team2_name}</span>
                 </div>
-                <a href="/match/{m.id}" style="display:block;margin-top:12px;padding:10px;background:#3b82f6;color:white;text-align:center;text-decoration:none;border-radius:8px;">Подробный анализ →</a>
+                <div style="display:flex;gap:10px;justify-content:center;margin-top:10px;">
+                    <span style="background:#334155;padding:5px 15px;border-radius:8px;">К1: {m.team1_odds or '—'}</span>
+                    <span style="background:#334155;padding:5px 15px;border-radius:8px;">К2: {m.team2_odds or '—'}</span>
+                </div>
+                <a href="/match/{m.id}" style="display:block;margin-top:12px;padding:10px;background:#3b82f6;color:white;text-align:center;text-decoration:none;border-radius:8px;">🤖 AI-анализ →</a>
             </div>
             """
     else:
@@ -38,7 +43,6 @@ async def home():
         <div style="background:#1e293b;border-radius:12px;padding:48px;text-align:center;">
             <div style="font-size:48px;">📭</div>
             <p style="color:#94a3b8;font-size:18px;">Матчей пока нет</p>
-            <p style="color:#64748b;">Добавьте сбор данных для загрузки матчей</p>
         </div>
         """
     
@@ -47,45 +51,19 @@ async def home():
     <html lang="ru">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Dota 2 Winline Analyzer</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <link rel="stylesheet" href="/static/css/style.css">
     </head>
     <body>
-        <header>
-            <div class="container">
-                <a href="/" class="logo">🎮 Dota2 Analyzer</a>
-                <nav class="nav-links">
-                    <a href="/">Матчи</a>
-                </nav>
-            </div>
-        </header>
+        <header><div class="container"><a href="/" class="logo">🎮 Dota2 Analyzer</a></div></header>
         <main class="container">
             <h1 style="font-size:32px;margin-bottom:8px;">🎮 Анализ матчей Dota 2</h1>
-            <p style="color:#94a3b8;margin-bottom:32px;">AI-прогнозы с учётом коэффициентов Winline</p>
-            
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px;">
-                <div class="card">
-                    <div style="color:#94a3b8;font-size:14px;">Матчей сегодня</div>
-                    <div style="font-size:28px;font-weight:700;">0</div>
-                </div>
-                <div class="card">
-                    <div style="color:#94a3b8;font-size:14px;">LIVE прямо сейчас</div>
-                    <div style="font-size:28px;font-weight:700;">0</div>
-                </div>
-                <div class="card">
-                    <div style="color:#94a3b8;font-size:14px;">Value Bets</div>
-                    <div style="font-size:28px;font-weight:700;color:#22c55e;">0</div>
-                </div>
-            </div>
-            
+            <p style="color:#94a3b8;margin-bottom:32px;">AI-прогнозы от GigaChat с учётом коэффициентов Winline</p>
             <h2 style="font-size:24px;margin-bottom:16px;">📊 Матчи</h2>
             {matches_html}
         </main>
-        <footer>
-            <p>Dota 2 Winline Analyzer | Данные: OpenDota API</p>
-        </footer>
+        <footer><p>Dota 2 Winline Analyzer | Данные: OpenDota API | AI: GigaChat</p></footer>
     </body>
     </html>
     """
@@ -99,8 +77,9 @@ async def match_detail(match_id: int):
     if not match:
         return "<h1>Матч не найден</h1><a href='/'>Назад</a>"
     
-    odds1 = f"Кэф: {match.team1_odds:.2f}" if match.team1_odds else ""
-    odds2 = f"Кэф: {match.team2_odds:.2f}" if match.team2_odds else ""
+    # Получаем AI-анализ
+    ai_text = analyzer.analyze_match(match.team1_name, match.team2_name, match.team1_odds, match.team2_odds)
+    ai_text = ai_text.replace('\n', '<br>')
     
     return f"""
     <!DOCTYPE html>
@@ -109,31 +88,28 @@ async def match_detail(match_id: int):
         <meta charset="UTF-8">
         <title>{match.team1_name} vs {match.team2_name}</title>
         <link href="/static/css/style.css" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     </head>
     <body>
-        <header>
-            <div class="container">
-                <a href="/" class="logo">🎮 Dota2 Analyzer</a>
-            </div>
-        </header>
+        <header><div class="container"><a href="/" class="logo">🎮 Dota2 Analyzer</a></div></header>
         <main class="container">
-            <a href="/" style="color:#3b82f6;">← Назад к матчам</a>
+            <a href="/" style="color:#3b82f6;">← Назад</a>
             <div class="card" style="margin:20px 0;">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                     <div style="text-align:center;flex:1;">
                         <div style="font-size:24px;font-weight:700;">{match.team1_name}</div>
-                        <div style="color:#94a3b8;">{odds1}</div>
+                        <div style="color:#94a3b8;">Кэф: {match.team1_odds or '—'}</div>
                     </div>
                     <div style="font-size:24px;font-weight:700;">VS</div>
                     <div style="text-align:center;flex:1;">
                         <div style="font-size:24px;font-weight:700;">{match.team2_name}</div>
-                        <div style="color:#94a3b8;">{odds2}</div>
+                        <div style="color:#94a3b8;">Кэф: {match.team2_odds or '—'}</div>
                     </div>
                 </div>
             </div>
             <div class="card" style="background:linear-gradient(135deg,#1e1b4b,#1e293b);">
-                <h3>🤖 AI Анализ</h3>
-                <p style="color:#94a3b8;">Добавьте GigaChat API ключ для анализа</p>
+                <h3 style="margin-bottom:16px;">🤖 AI Анализ от GigaChat</h3>
+                <div style="color:#cbd5e1;line-height:1.6;">{ai_text}</div>
             </div>
         </main>
     </body>
