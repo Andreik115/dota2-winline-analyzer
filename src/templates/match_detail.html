@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div>
+    <div style="margin-bottom: 24px;">
+        <a href="/" style="color: #3b82f6; text-decoration: none;">← Назад к матчам</a>
+    </div>
+    
+    <div class="card" style="margin-bottom: 32px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="text-align: center; flex: 1;">
+                <div style="font-size: 24px; font-weight: 700;">{{ match.team1_name }}</div>
+                {% if match.team1_odds %}
+                <div style="margin-top: 8px; color: #94a3b8;">Кэф: {{ "%.2f"|format(match.team1_odds) }}</div>
+                {% endif %}
+            </div>
+            <div style="padding: 0 32px; text-align: center;">
+                <div style="font-size: 24px; font-weight: 700; color: #94a3b8;">VS</div>
+            </div>
+            <div style="text-align: center; flex: 1;">
+                <div style="font-size: 24px; font-weight: 700;">{{ match.team2_name }}</div>
+                {% if match.team2_odds %}
+                <div style="margin-top: 8px; color: #94a3b8;">Кэф: {{ "%.2f"|format(match.team2_odds) }}</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="card" style="background: linear-gradient(135deg, #1e1b4b, #1e293b); margin-bottom: 24px;">
+        <h3 style="font-size: 20px; margin-bottom: 16px;">🤖 AI Анализ</h3>
+        <p style="color: #94a3b8;">Добавьте GigaChat API ключ для AI-анализа</p>
+    </div>
+</div>
+{% endblock %}
