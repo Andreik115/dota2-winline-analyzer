@@ -15,7 +15,7 @@ class Dota2Analyzer:
     
     def analyze_match(self, team1: str, team2: str, odds1: float = None, odds2: float = None) -> str:
         if not self.client:
-            return "⚠️ GigaChat API ключ не настроен. Добавьте ключ в .env файл."
+            return "⚠️ GigaChat не настроен. Добавьте ключ в .env файл."
         
         prompt = f"""
         Проанализируй матч Dota 2: {team1} vs {team2}.
