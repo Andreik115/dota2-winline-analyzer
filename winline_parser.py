@@ -2,11 +2,11 @@
 import time
 import sqlite3
 import os
-from datetime import datetime
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 DB_PATH = "data/dota2.db"
@@ -27,93 +27,51 @@ class WinlineParser:
             options=options
         )
     
-    def get_matches_with_odds(self):
-        """Собирает матчи и коэффициенты"""
+    def get_matches(self):
         print("📡 Загружаю Winline...")
         self.driver.get(self.URL)
-        time.sleep(5)  # Ждём загрузку
+        time.sleep(5)
         
         matches = []
         
-        # Ищем все текстовые блоки на странице
-        body = self.driver.find_element(By.TAG_NAME, "body").text
+        # Ищем все кнопки/блоки с коэффициентами
+        # У Winline кэфы обычно в элементах с data-testid или class содержащим "outcome"
+        try:
+            # Ищем все элементы, которые могут содержать коэффициенты (числа)
+            elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), '.')]")
+            
+            odds_elements = []
+            for el in elements:
+                text = el.text.strip()
+                # Проверяем, похоже ли на коэффициент (число с точкой)
+                if re.match(r'^\d+\.\d{2}$', text):
+                    odds_elements.append(float(text))
+            
+            # Ищем названия команд (текст КАПСОМ или с заглавной)
+            team_elements = self.driver.find_elements(By.XPATH, 
+                "//*[contains(@class, 'team') or contains(@class, 'participant') or contains(@class, 'name')]")
+            
+            teams = []
+            for el in team_elements:
+                text = el.text.strip()
+                if text and len(text) > 3:
+                    teams.append(text)
+            
+            print(f"   Команд: {len(teams)}, Кэфов: {len(odds_elements)}")
+            
+            # Показываем что нашли
+            print("   Команды:", teams[:10])
+            print("   Кэфы:", odds_elements[:10])
+            
+        except Exception as e:
+            print(f"   Ошибка: {e}")
         
-        # Ищем названия команд и коэффициенты
-        # Пример структуры Winline: Team Spirit 1.85 Virtus.pro 2.10
-        lines = body.split('\n')
-        
-        i = 0
-        while i < len(lines) - 3:
-            line = lines[i].strip()
-            # Ищем строки, похожие на названия команд
-            if line and line[0].isupper() and len(line) > 3:
-                try:
-                    # Проверяем, есть ли дальше числа (коэффициенты)
-                    next_lines = [lines[i+j].strip() for j in range(1, 5)]
-                    nums = []
-                    for nl in next_lines:
-                        try:
-                            nums.append(float(nl))
-                        except:
-                            pass
-                    
-                    if len(nums) >= 2:
-                        team1 = line
-                        team2_candidate = ""
-                        for nl in next_lines:
-                            if nl and nl[0].isupper() and len(nl) > 3:
-                                team2_candidate = nl
-                                break
-                        
-                        if team2_candidate:
-                            matches.append({
-                                'team1': team1,
-                                'team2': team2_candidate,
-                                'odds1': nums[0],
-                                'odds2': nums[-1]
-                            })
-                except:
-                    pass
-            i += 1
-        
-        return matches[:30]
-    
-    def update_db(self):
-        matches = self.get_matches_with_odds()
-        print(f"   Найдено матчей с кэфами: {len(matches)}")
-        
-        if not matches:
-            print("⚠️ Не удалось распарсить. Сохраняю скриншот...")
-            self.driver.save_screenshot("winline_debug.png")
-            print("   Скриншот сохранён: winline_debug.png")
-            return 0
-        
-        conn = sqlite3.connect(DB_PATH)
-        updated = 0
-        
-        for m in matches:
-            # Ищем матч по названиям команд
-            cursor = conn.execute(
-                "SELECT id FROM matches WHERE team1_name LIKE ? AND team2_name LIKE ?",
-                (f"%{m['team1']}%", f"%{m['team2']}%")
-            )
-            row = cursor.fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE matches SET team1_odds=?, team2_odds=? WHERE id=?",
-                    (m['odds1'], m['odds2'], row[0])
-                )
-                updated += 1
-        
-        conn.commit()
-        conn.close()
-        print(f"✅ Обновлено коэффициентов: {updated}")
-        return updated
+        return matches
     
     def close(self):
         self.driver.quit()
 
 if __name__ == "__main__":
-    parser = WinlineParser(headless=False)  # Увидишь браузер
-    parser.update_db()
+    parser = WinlineParser(headless=True)
+    parser.get_matches()
     parser.close()
