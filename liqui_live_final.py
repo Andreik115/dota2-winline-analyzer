@@ -1,4 +1,3 @@
-# liqui_live_final.py
 import requests, sqlite3, time, re
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -25,44 +24,53 @@ def parse_live():
     soup = BeautifulSoup(r.text, 'lxml')
     matches = []
     
-    # Ищем текст страницы
+    # Получаем весь текст
     text = soup.get_text()
-    lines = text.split('\n')
+    
+    # Разбиваем на строки
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
     
     i = 0
-    while i < len(lines) - 3:
-        line = lines[i].strip()
-        next_lines = [lines[i+j].strip() for j in range(1, 5)]
-        combined = ' '.join([line] + next_lines)
+    while i < len(lines) - 2:
+        # Ищем "LIVE" в трёх соседних строках
+        segment = ' '.join(lines[i:i+6]) if i+6 <= len(lines) else ' '.join(lines[i:])
         
-        # Ищем паттерн "Команда1 vs Команда2" рядом с LIVE
-        if 'LIVE' in combined and 'vs' in combined.lower():
-            # Ищем команды до и после vs
-            parts = combined.split('vs')
-            if len(parts) >= 2:
-                team1 = parts[0].strip().split('\n')[-1].strip()
-                team2 = parts[1].strip().split('\n')[0].strip()
+        if 'LIVE' in segment and 'vs' in segment.lower():
+            # Нашли блок с LIVE-матчем
+            block = lines[i:i+8]
+            block_text = ' | '.join(block)
+            
+            # Ищем команды
+            vs_idx = -1
+            for j, l in enumerate(block):
+                if l.lower() == 'vs':
+                    vs_idx = j
+                    break
+            
+            if vs_idx >= 1 and vs_idx < len(block) - 1:
+                team1 = block[vs_idx - 1]
+                team2 = block[vs_idx + 1]
                 
-                # Ищем турнир
+                # Ищем турнир (самая длинная строка рядом)
                 tournament = ""
-                for nl in next_lines + lines[i+3:i+8]:
-                    if len(nl) > 10 and not nl.startswith('LIVE') and 'vs' not in nl.lower():
-                        tournament = nl.strip()
-                        break
+                for l in block:
+                    if len(l) > len(tournament) and l not in [team1, team2, 'LIVE', 'vs']:
+                        tournament = l
                 
-                # Время матча
+                # Ищем время матча
                 time_str = ""
-                time_match = re.search(r'(\d+m\s*\d+s|\d+m)', combined)
-                if time_match:
-                    time_str = time_match.group(1)
+                for l in block:
+                    tm = re.search(r'(\d+m\s*\d*s|\d+m|\d+:\d+)', l)
+                    if tm:
+                        time_str = tm.group(1)
                 
                 matches.append({
-                    'team1': team1[:50],
-                    'team2': team2[:50],
-                    'tournament': tournament[:100],
+                    'team1': team1[:60],
+                    'team2': team2[:60],
+                    'tournament': tournament[:100] or "Неизвестный турнир",
                     'time': time_str
                 })
-                i += 5
+                i += 8
                 continue
         i += 1
     
@@ -76,25 +84,24 @@ def main():
         matches = parse_live()
         
         print(f"\n{'='*50}")
-        print(f"[{now}] 🔴 LIVE-МАТЧИ: {len(matches)}")
+        print(f"[{now}] 🔴 LIVE-МАТЧЕЙ: {len(matches)}")
         print(f"{'='*50}")
         
-        if matches:
-            for m in matches:
-                print(f"\n🏆 {m['tournament']}")
-                print(f"   {m['team1']} vs {m['team2']}")
-                if m['time']:
-                    print(f"   ⏱️ {m['time']}")
-                
-                # Сохраняем в базу
-                conn.execute(
-                    "INSERT INTO live_matches (team1, team2, tournament, status, match_time, updated) VALUES (?, ?, ?, 'LIVE', ?, ?)",
-                    (m['team1'], m['team2'], m['tournament'], m['time'], now)
-                )
-                conn.commit()
-        else:
+        for m in matches:
+            print(f"\n🏆 {m['tournament']}")
+            print(f"   {m['team1']} VS {m['team2']}")
+            if m['time']:
+                print(f"   ⏱️ {m['time']}")
+            
+            conn.execute(
+                "INSERT INTO live_matches (team1, team2, tournament, status, match_time, updated) VALUES (?, ?, ?, 'LIVE', ?, ?)",
+                (m['team1'], m['team2'], m['tournament'], m['time'], now)
+            )
+        
+        if not matches:
             print("   Нет активных матчей")
         
+        conn.commit()
         print(f"\n⏳ Обновление через 30 сек...")
         time.sleep(30)
 
