@@ -63,39 +63,45 @@ class WinlineParser:
         
         return matches
     
-    def update_db(self):
-        matches = self.parse()
-        
-        if not matches:
-            print("⚠️ Матчи не найдены")
-            return 0
-        
-        conn = sqlite3.connect(DB_PATH)
-        updated = 0
-        
-        for m in matches:
-            # Ищем матч по фрагментам названий
-            cursor = conn.execute(
-                "SELECT id FROM matches WHERE (team1_name LIKE ? OR team2_name LIKE ?) AND (team1_name LIKE ? OR team2_name LIKE ?)",
-                (f"%{m['team1']}%", f"%{m['team1']}%", f"%{m['team2']}%", f"%{m['team2']}%")
-            )
-            row = cursor.fetchone()
-            if row:
-                conn.execute(
-                    "UPDATE matches SET team1_odds=?, team2_odds=? WHERE id=?",
-                    (m['odds1'], m['odds2'], row[0])
-                )
-                updated += 1
-        
-        conn.commit()
-        conn.close()
-        print(f"✅ Обновлено коэффициентов: {updated}")
-        return updated
+   def update_db(self):
+    matches = self.parse()
     
-    def close(self):
-        self.driver.quit()
-
-if __name__ == "__main__":
-    parser = WinlineParser(headless=True)
-    parser.update_db()
-    parser.close()
+    if not matches:
+        print("⚠️ Матчи не найдены")
+        return 0
+    
+    conn = sqlite3.connect(DB_PATH)
+    added = 0
+    updated = 0
+    
+    for m in matches:
+        # Ищем матч по фрагментам
+        cursor = conn.execute(
+            "SELECT id FROM matches WHERE (team1_name LIKE ? OR team2_name LIKE ?)",
+            (f"%{m['team1']}%", f"%{m['team2']}%")
+        )
+        row = cursor.fetchone()
+        
+        if row:
+            # Обновляем коэффициенты
+            conn.execute(
+                "UPDATE matches SET team1_odds=?, team2_odds=? WHERE id=?",
+                (m['odds1'], m['odds2'], row[0])
+            )
+            updated += 1
+        else:
+            # Добавляем новый матч
+            ext_id = f"winline_{m['team1']}_{m['team2']}".replace(' ', '_')
+            try:
+                conn.execute(
+                    "INSERT INTO matches (match_external_id, tournament, team1_name, team2_name, team1_odds, team2_odds) VALUES (?, ?, ?, ?, ?, ?)",
+                    (ext_id, "Winline Dota 2", m['team1'], m['team2'], m['odds1'], m['odds2'])
+                )
+                added += 1
+            except:
+                pass
+    
+    conn.commit()
+    conn.close()
+    print(f"✅ Добавлено: {added}, Обновлено: {updated}")
+    return added + updated
