@@ -5,7 +5,6 @@ import time
 import os
 
 DB_PATH = "data/dota2.db"
-MATCHES_TO_FETCH = 500  # Сколько матчей скачать
 
 def create_table():
     conn = sqlite3.connect(DB_PATH)
@@ -46,46 +45,42 @@ def main():
     conn = create_table()
     added = 0
     
-    for match in matches[:MATCHES_TO_FETCH]:
+    for i, match in enumerate(matches[:100]):  # Берём 100 матчей
         match_id = match.get("match_id")
         
-        # Проверяем, есть ли уже
         exists = conn.execute("SELECT 1 FROM match_details WHERE match_id=?", (match_id,)).fetchone()
         if exists:
+            print(f"   [{i+1}/100] Матч {match_id} уже есть, пропускаю")
             continue
         
-        print(f"   Скачиваю матч {match_id}... ({added+1}/{MATCHES_TO_FETCH})")
+        print(f"   [{i+1}/100] Скачиваю матч {match_id}...")
         details = fetch_match_details(match_id)
         
         if not details:
-            time.sleep(0.5)
+            print(f"   ⚠️ Не удалось скачать {match_id}")
             continue
         
-        # Собираем пики
         radiant_picks = []
         dire_picks = []
         for p in details.get("picks", []):
-            hero = p.get("hero_id")
+            hero = str(p.get("hero_id"))
             if p.get("is_radiant"):
-                radiant_picks.append(str(hero))
+                radiant_picks.append(hero)
             else:
-                dire_picks.append(str(hero))
+                dire_picks.append(hero)
         
-        # Собираем преимущество по золоту (каждые 60 секунд)
         gold_adv = []
-        for adv in details.get("radiant_gold_adv", []):
+        for adv in details.get("radiant_gold_adv", []) or []:
             if adv is not None:
                 gold_adv.append(str(adv))
         
         xp_adv = []
-        for adv in details.get("radiant_xp_adv", []):
+        for adv in details.get("radiant_xp_adv", []) or []:
             if adv is not None:
                 xp_adv.append(str(adv))
         
         conn.execute("""
             INSERT OR IGNORE INTO match_details 
-            (match_id, radiant_team, dire_team, radiant_win, duration,
-             radiant_gold_adv, radiant_xp_adv, radiant_picks, dire_picks, league, start_time)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             match_id,
@@ -102,10 +97,9 @@ def main():
         ))
         conn.commit()
         added += 1
-        time.sleep(0.3)  # Пауза, чтобы не забанили
     
     conn.close()
-    print(f"\n✅ Скачано {added} матчей с деталями!")
+    print(f"\n✅ Скачано {added} матчей!")
 
 if __name__ == "__main__":
     main()
