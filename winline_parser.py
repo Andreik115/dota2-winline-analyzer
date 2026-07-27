@@ -1,5 +1,7 @@
 # winline_parser.py
-import time, sqlite3, re
+import time
+import sqlite3
+import re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -37,12 +39,10 @@ class WinlineParser:
                 text = event.text
                 lines = [l.strip() for l in text.split('\n') if l.strip()]
                 
-                # Первые две строки — команды (если не начинаются с цифр)
                 team1, team2 = "", ""
                 odds = []
                 
                 for line in lines:
-                    # Проверяем коэффициент (число.двецифры)
                     if re.match(r'^\d+\.\d{2}$', line):
                         odds.append(float(line))
                     elif not team1 and not line.startswith('+') and not line[0].isdigit():
@@ -54,8 +54,8 @@ class WinlineParser:
                     matches.append({
                         'team1': team1,
                         'team2': team2,
-                        'odds1': odds[0],  # П1
-                        'odds2': odds[2] if len(odds) >= 3 else odds[1]  # П2
+                        'odds1': odds[0],
+                        'odds2': odds[2] if len(odds) >= 3 else odds[1]
                     })
                     print(f"   {team1} ({odds[0]}) vs {team2} ({odds[-1]})")
             except:
@@ -63,45 +63,50 @@ class WinlineParser:
         
         return matches
     
-   def update_db(self):
-    matches = self.parse()
-    
-    if not matches:
-        print("⚠️ Матчи не найдены")
-        return 0
-    
-    conn = sqlite3.connect(DB_PATH)
-    added = 0
-    updated = 0
-    
-    for m in matches:
-        # Ищем матч по фрагментам
-        cursor = conn.execute(
-            "SELECT id FROM matches WHERE (team1_name LIKE ? OR team2_name LIKE ?)",
-            (f"%{m['team1']}%", f"%{m['team2']}%")
-        )
-        row = cursor.fetchone()
+    def update_db(self):
+        matches = self.parse()
         
-        if row:
-            # Обновляем коэффициенты
-            conn.execute(
-                "UPDATE matches SET team1_odds=?, team2_odds=? WHERE id=?",
-                (m['odds1'], m['odds2'], row[0])
+        if not matches:
+            print("⚠️ Матчи не найдены")
+            return 0
+        
+        conn = sqlite3.connect(DB_PATH)
+        added = 0
+        updated = 0
+        
+        for m in matches:
+            cursor = conn.execute(
+                "SELECT id FROM matches WHERE (team1_name LIKE ? OR team2_name LIKE ?)",
+                (f"%{m['team1']}%", f"%{m['team2']}%")
             )
-            updated += 1
-        else:
-            # Добавляем новый матч
-            ext_id = f"winline_{m['team1']}_{m['team2']}".replace(' ', '_')
-            try:
+            row = cursor.fetchone()
+            
+            if row:
                 conn.execute(
-                    "INSERT INTO matches (match_external_id, tournament, team1_name, team2_name, team1_odds, team2_odds) VALUES (?, ?, ?, ?, ?, ?)",
-                    (ext_id, "Winline Dota 2", m['team1'], m['team2'], m['odds1'], m['odds2'])
+                    "UPDATE matches SET team1_odds=?, team2_odds=? WHERE id=?",
+                    (m['odds1'], m['odds2'], row[0])
                 )
-                added += 1
-            except:
-                pass
+                updated += 1
+            else:
+                ext_id = f"winline_{m['team1']}_{m['team2']}".replace(' ', '_')
+                try:
+                    conn.execute(
+                        "INSERT INTO matches (match_external_id, tournament, team1_name, team2_name, team1_odds, team2_odds) VALUES (?, ?, ?, ?, ?, ?)",
+                        (ext_id, "Winline Dota 2", m['team1'], m['team2'], m['odds1'], m['odds2'])
+                    )
+                    added += 1
+                except:
+                    pass
+        
+        conn.commit()
+        conn.close()
+        print(f"✅ Добавлено: {added}, Обновлено: {updated}")
+        return added + updated
     
-    conn.commit()
-    conn.close()
-    print(f"✅ Добавлено: {added}, Обновлено: {updated}")
-    return added + updated
+    def close(self):
+        self.driver.quit()
+
+if __name__ == "__main__":
+    parser = WinlineParser(headless=True)
+    parser.update_db()
+    parser.close()
