@@ -19,44 +19,52 @@ def parse():
     driver = get_driver()
     driver.get(URL)
     time.sleep(5)
-    text = driver.find_element(By.TAG_NAME, "body").text
+    lines = [l.strip() for l in driver.find_element(By.TAG_NAME, "body").text.split('\n') if l.strip()]
     driver.quit()
     
-    lines = [l.strip() for l in text.split('\n') if l.strip()]
     matches = []
+    i = 18  # Пропускаем меню
     
-    for i, line in enumerate(lines):
-        if line == 'LIVE' and i >= 2 and i < len(lines) - 2:
-            # Ищем "Команда1 vs Команда2" перед LIVE
-            # Структура: Команда1 \n vs \n (Bo3) \n Команда2 \n Турнир \n LIVE
-            if i >= 4:
-                team1 = lines[i-4]
-                team2 = lines[i-1]
-                vs_check = lines[i-3]
-                
-                if vs_check.lower() == 'vs' and team1 != 'LIVE' and team2 != 'LIVE':
-                    tournament = lines[i+1] if i+1 < len(lines) else ""
-                    
-                    time_str = ""
-                    for j in range(i+2, min(i+8, len(lines))):
-                        m = re.search(r'(\d+m\s*\d*s|\d+m)', lines[j])
-                        if m:
-                            time_str = m.group(1)
-                            break
-                    
-                    matches.append({
-                        'team1': team1,
-                        'team2': team2,
-                        'tournament': tournament,
-                        'time': time_str
-                    })
+    while i < len(lines) - 5:
+        # Ищем паттерн: team1 \n vs \n (Bo3) \n team2 \n турнир \n статус
+        if lines[i+1] == 'vs' and lines[i+2].startswith('(Bo'):
+            team1 = lines[i]
+            team2 = lines[i+3]
+            tournament = lines[i+4]
+            status = lines[i+5]
+            
+            # Определяем время
+            time_str = ""
+            if re.match(r'\d+m', status):
+                time_str = status
+                status = "LIVE"
+            elif status == 'LIVE':
+                # Время может быть дальше
+                if i+6 < len(lines) and re.match(r'\d+m', lines[i+6]):
+                    time_str = lines[i+6]
+            else:
+                time_str = status
+                status = "UPCOMING"
+            
+            matches.append({
+                'team1': team1,
+                'team2': team2,
+                'tournament': tournament,
+                'status': status,
+                'time': time_str
+            })
+            i += 6
+        else:
+            i += 1
     
     return matches
 
 def main():
     while True:
         now = datetime.now().strftime('%H:%M:%S')
-        print(f"\n[{now}] 📡 Парсинг...")
+        print(f"\n{'='*50}")
+        print(f"[{now}] 📡 Парсинг Liquipedia")
+        print(f"{'='*50}")
         
         try:
             matches = parse()
@@ -65,13 +73,18 @@ def main():
             time.sleep(30)
             continue
         
-        print(f"🔴 LIVE-МАТЧЕЙ: {len(matches)}")
-        for m in matches:
+        live = [m for m in matches if m['status'] == 'LIVE']
+        upcoming = [m for m in matches if m['status'] == 'UPCOMING']
+        
+        print(f"\n🔴 LIVE ({len(live)}):")
+        for m in live:
             print(f"   {m['team1']} VS {m['team2']} | {m['tournament']} | ⏱️ {m['time']}")
         
-        if not matches:
-            print("   Нет активных матчей")
+        print(f"\n⏳ Предстоящие ({len(upcoming)}):")
+        for m in upcoming:
+            print(f"   {m['team1']} VS {m['team2']} | {m['tournament']} | ⏰ {m['time']}")
         
+        print(f"\n⏳ Обновление через 30 сек...")
         time.sleep(30)
 
 if __name__ == "__main__":
