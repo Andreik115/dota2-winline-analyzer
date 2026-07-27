@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Dota 2 Live Winline Analyzer</title>
+    <link rel="stylesheet" href="https://jsdelivr.net">
+    <meta http-equiv="refresh" content="30"> <!-- Автообновление страницы каждые 30 секунд -->
+</head>
+<body class="bg-dark text-light">
+    <div class="container my-5">
+        <h1 class="mb-4 text-warning">🤖 Dota 2 Live-Анализатор матчей (Winline & GigaChat)</h1>
+        
+        {% if not matches %}
+            <div class="alert alert-info bg-secondary text-light">В данный момент нет активных Live-матчей на Liquipedia. Проверяем линию...</div>
+        {% else %}
+            <div class="row">
+                {% for match in matches %}
+                    <div class="col-12 mb-4">
+                        <div class="card bg-secondary text-light border-warning">
+                            <div class="card-header d-flex justify-content-between text-warning fw-bold">
+                                <span>🏆 {{ match.tournament }}</span>
+                                <span class="badge bg-danger">LIVE</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="row text-center mb-3">
+                                    <div class="col-5"><h3>{{ match.team_a }}</h3></div>
+                                    <div class="col-2 text-warning"><h2>VS</h2></div>
+                                    <div class="col-5"><h3>{{ match.team_b }}</h3></div>
+                                </div>
+                                
+                                <div class="bg-dark p-3 rounded mb-3 text-center">
+                                    <h5 class="text-secondary">Текущие коэффициенты Winline</h5>
+                                    {% if match.odds_history %}
+                                        <span class="fs-4 text-success mx-3">П1: {{ match.odds_history[-1].odds_a }}</span>
+                                        <span class="fs-4 text-success mx-3">П2: {{ match.odds_history[-1].odds_b }}</span>
+                                    {% else %}
+                                        <span class="text-muted">Коэффициенты загружаются...</span>
+                                    {% endif %}
+                                </div>
+
+                                <div class="bg-dark p-3 rounded">
+                                    <h5 class="text-warning">🧠 Аналитика ИИ GigaChat:</h5>
+                                    <p class="mb-0" style="white-space: pre-line;">{{ match.ai_prediction }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
