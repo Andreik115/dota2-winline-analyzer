@@ -4,23 +4,37 @@ from dotenv import load_dotenv
 load_dotenv()
 key = os.getenv('STRATZ_API_KEY')
 
-query = """
+# Сначала получим live-матчи (они содержат ID)
+query1 = """
 {
-  matches(request: { take: 3 }) {
-    id
-    radiantTeam { name }
-    direTeam { name }
-    didRadiantWin
-    durationSeconds
-    league { name }
-    endDateTime
+  live {
+    matches {
+      matchId
+    }
   }
 }
 """
 
-r = requests.post('https://api.stratz.com/graphql',
-                   headers={'Authorization': f'Bearer {key}'},
-                   json={'query': query})
+r1 = requests.post('https://api.stratz.com/graphql',
+                    headers={'Authorization': f'Bearer {key}'},
+                    json={'query': query1})
 
-print(f'Статус: {r.status_code}')
-print(r.text[:500])
+print(f'Live статус: {r1.status_code}')
+print(r1.text[:300])
+
+# Попробуем другой подход - ищем по турнирам
+query2 = """
+{
+  leagues(request: { take: 3 }) {
+    id
+    name
+  }
+}
+"""
+
+r2 = requests.post('https://api.stratz.com/graphql',
+                    headers={'Authorization': f'Bearer {key}'},
+                    json={'query': query2})
+
+print(f'\nЛиги статус: {r2.status_code}')
+print(r2.text[:300])
