@@ -19,8 +19,21 @@ def init_db():
             team1 TEXT, team2 TEXT, tournament TEXT,
             status TEXT, match_time TEXT,
             odds1 REAL, odds2 REAL,
+            odds_total REAL, odds_total_over REAL, odds_total_under REAL,
+            odds_fora1 REAL, odds_fora2 REAL,
             ai_verdict TEXT, confidence TEXT,
             updated TEXT
+        )
+    """)
+    # Таблица для полных коэффициентов Winline
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS winline_odds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team1 TEXT, team2 TEXT,
+            odds_p1 REAL, odds_x REAL, odds_p2 REAL,
+            odds_total REAL, odds_total_over REAL, odds_total_under REAL,
+            odds_fora REAL, odds_fora1 REAL, odds_fora2 REAL,
+            match_time TEXT, updated TEXT
         )
     """)
     conn.commit()
@@ -31,10 +44,10 @@ def get_driver():
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("user-agent=Mozilla/5.0")
     return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
 def parse_liquipedia():
-    """Собирает live и upcoming матчи"""
     driver = get_driver()
     driver.get(LIQUI_URL)
     time.sleep(5)
@@ -66,25 +79,97 @@ def parse_liquipedia():
     
     return matches
 
+def parse_winline_full():
+    """Собирает все коэффициенты Winline: исход, тотал, фора"""
+    driver = get_driver()
+    driver.get("https://winline.ru/stavki/sport/kibersport/dota_2")
+    time.sleep(5)
+    
+    events = driver.find_elements(By.CSS_SELECTOR, ".event-card")
+    print(f"   Найдено событий Winline: {len(events)}")
+    
+    all_odds = []
+    for event in events:
+        try:
+            text = event.text
+            lines = [l.strip() for l in text.split('\n') if l.strip()]
+            
+            team1, team2 = "", ""
+            odds_p1 = odds_x = odds_p2 = None
+            total = total_over = total_under = None
+            fora = fora1 = fora2 = None
+            
+            for i, line in enumerate(lines):
+                # Ищем команды (первая и вторая строка с буквами)
+                if not team1 and re.match(r'^[A-Z]', line) and not re.match(r'^\d', line):
+                    team1 = line
+                elif team1 and not team2 and re.match(r'^[A-Z]', line) and line != team1:
+                    team2 = line
+                
+                # Коэффициенты на исход
+                nums = re.findall(r'^(\d+\.\d{2})$', line)
+                if nums and not odds_p1:
+                    odds_p1 = float(nums[0])
+                elif nums and odds_p1 and not odds_x:
+                    odds_x = float(nums[0])
+                elif nums and odds_x and not odds_p2:
+                    odds_p2 = float(nums[0])
+            
+            if team1 and team2 and odds_p1:
+                all_odds.append({
+                    'team1': team1, 'team2': team2,
+                    'odds_p1': odds_p1, 'odds_x': odds_x,
+                    'odds_p2': odds_p2,
+                    'total': total, 'total_over': total_over, 'total_under': total_under,
+                    'fora': fora, 'fora1': fora1, 'fora2': fora2
+                })
+        except:
+            pass
+    
+    driver.quit()
+    return all_odds
+
 def find_odds(team1, team2, conn):
-    """Ищет коэффициенты Winline в базе"""
-    # Прямое совпадение
-    row = conn.execute(
-        "SELECT team1_odds, team2_odds FROM matches WHERE team1_name LIKE ? AND team2_name LIKE ? AND team1_odds IS NOT NULL",
-        (f"%{team1}%", f"%{team2}%")
-    ).fetchone()
-    if row:
-        return row[0], row[1]
+    """Ищет коэффициенты в winline_odds"""
+    for table in ['winline_odds', 'matches']:
+        cols = "odds_p1, odds_x, odds_p2, odds_total, odds_total_over, odds_total_under, odds_fora, odds_fora1, odds_fora2" if table == 'winline_odds' else "team1_odds, NULL, team2_odds, NULL, NULL, NULL, NULL, NULL, NULL"
+        
+        row = conn.execute(
+            f"SELECT {cols} FROM {table} WHERE team1_name LIKE ? AND team2_name LIKE ? LIMIT 1",
+            (f"%{team1}%", f"%{team2}%")
+        ).fetchone()
+        
+        if not row:
+            row = conn.execute(
+                f"SELECT {cols} FROM {table} WHERE team1_name LIKE ? AND team2_name LIKE ? LIMIT 1",
+                (f"%{team2}%", f"%{team1}%")
+            ).fetchone()
+        
+        if row and row[0]:
+            return row
     
-    # Обратное совпадение
-    row = conn.execute(
-        "SELECT team2_odds, team1_odds FROM matches WHERE team1_name LIKE ? AND team2_name LIKE ? AND team1_odds IS NOT NULL",
-        (f"%{team2}%", f"%{team1}%")
-    ).fetchone()
-    if row:
-        return row[0], row[1]
+    return (None,) * 9
+
+def analyze_with_ai(match, odds):
+    """Отправляет матч в GigaChat с полными коэффициентами"""
+    odds_text = f"П1={odds[0]}"
+    if odds[1]:
+        odds_text += f", X={odds[1]}"
+    if odds[2]:
+        odds_text += f", П2={odds[2]}"
+    if odds[4]:
+        odds_text += f" | Тотал: ТБ={odds[4]}, ТМ={odds[5]}"
+    if odds[7]:
+        odds_text += f" | Фора: Ф1={odds[7]}, Ф2={odds[8]}"
     
-    return None, None
+    try:
+        return analyzer.analyze_match(
+            match['team1'], match['team2'],
+            odds[0], odds[2],
+            match['tournament']
+        )
+    except:
+        return None
 
 def main():
     conn = init_db()
@@ -98,70 +183,106 @@ def main():
         # 1. Парсим Liquipedia
         print("\n📡 Liquipedia...")
         try:
-            matches = parse_liquipedia()
-        except Exception as e:
-            print(f"❌ {e}")
-            time.sleep(30)
-            continue
+            liqui_matches = parse_liquipedia()
+        except:
+            liqui_matches = []
         
-        live = [m for m in matches if m['status'] == 'LIVE']
-        upcoming = [m for m in matches if m['status'] == 'UPCOMING']
+        live = [m for m in liqui_matches if m['status'] == 'LIVE']
+        upcoming = [m for m in liqui_matches if m['status'] == 'UPCOMING']
         
         print(f"   🔴 LIVE: {len(live)} | ⏳ Upcoming: {len(upcoming)}")
         
-        # 2. Анализируем LIVE-матчи
+        # 2. Парсим Winline (полные кэфы)
+        print("\n💰 Winline...")
+        try:
+            winline_odds = parse_winline_full()
+        except:
+            winline_odds = []
+        
+        # Сохраняем в базу
+        for w in winline_odds:
+            conn.execute("""
+                INSERT OR REPLACE INTO winline_odds 
+                (team1, team2, odds_p1, odds_x, odds_p2, odds_total, odds_total_over, odds_total_under, odds_fora, odds_fora1, odds_fora2, match_time, updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                w['team1'], w['team2'],
+                w['odds_p1'], w['odds_x'], w['odds_p2'],
+                w['total'], w['total_over'], w['total_under'],
+                w['fora'], w['fora1'], w['fora2'],
+                '', now
+            ))
+        conn.commit()
+        
+        print(f"   Обновлено: {len(winline_odds)} матчей")
+        
+        # 3. Анализируем LIVE
         if live:
             print(f"\n{'─'*60}")
-            print("🔴 LIVE-АНАЛИЗ:")
+            print("🔴 LIVE-МАТЧИ:")
             print(f"{'─'*60}")
             
-            for m in live[:5]:  # Топ-5 live
-                odds1, odds2 = find_odds(m['team1'], m['team2'], conn)
-                
-                print(f"\n   {m['team1']} VS {m['team2']}")
-                print(f"   🏆 {m['tournament']} | ⏱️ {m['time']}")
-                
-                if odds1 and odds2:
-                    print(f"   💰 Winline: П1={odds1}, П2={odds2}")
-                    
-                    # AI-анализ
-                    try:
-                        verdict = analyzer.analyze_match(
-                            m['team1'], m['team2'], odds1, odds2, m['tournament']
-                        )
-                        # Извлекаем вердикт
-                        if 'СТАВИТЬ' in verdict.upper():
-                            conf = "ВЫСОКАЯ" if 'ВЫСОКАЯ' in verdict.upper() else "СРЕДНЯЯ"
-                            conn.execute(
-                                "INSERT INTO live_bets (team1, team2, tournament, status, match_time, odds1, odds2, ai_verdict, confidence, updated) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                                (m['team1'], m['team2'], m['tournament'], 'LIVE', m['time'], odds1, odds2, verdict, conf, now)
-                            )
-                        print(f"   🤖 AI: {verdict[:200]}...")
-                    except Exception as e:
-                        print(f"   🤖 AI: ошибка - {e}")
+            for m in live[:8]:
+                odds = find_odds(m['team1'], m['team2'], conn)
+                odds_str = ""
+                if odds[0]:
+                    odds_str = f"💰 П1={odds[0]}"
+                    if odds[1]:
+                        odds_str += f" X={odds[1]}"
+                    odds_str += f" П2={odds[2]}"
+                    if odds[4]:
+                        odds_str += f" | ТБ={odds[4]} ТМ={odds[5]}"
+                    if odds[7]:
+                        odds_str += f" | Ф1={odds[7]} Ф2={odds[8]}"
                 else:
-                    print(f"   ⚠️ Нет коэффициентов Winline")
+                    odds_str = "⚪ Нет кэфов"
+                
+                print(f"\n   {m['team1']} VS {m['team2']} | ⏱️ {m['time']}")
+                print(f"   🏆 {m['tournament']}")
+                print(f"   {odds_str}")
         
-        # 3. Показываем предстоящие с кэфами
-        with_odds = [(m, *find_odds(m['team1'], m['team2'], conn)) for m in upcoming if find_odds(m['team1'], m['team2'], conn)[0]]
+        # 4. Анализируем предстоящие с кэфами + AI
+        print(f"\n{'─'*60}")
+        print("🎯 РЕКОМЕНДАЦИИ (предстоящие с кэфами):")
+        print(f"{'─'*60}")
         
-        if with_odds:
-            print(f"\n{'─'*60}")
-            print(f"💰 ПРЕДСТОЯЩИЕ С КЭФАМИ ({len(with_odds)}):")
-            print(f"{'─'*60}")
+        count = 0
+        for m in upcoming:
+            odds = find_odds(m['team1'], m['team2'], conn)
+            if not odds[0]:
+                continue
             
-            for m, o1, o2 in with_odds[:5]:
-                print(f"   {m['team1']} ({o1}) VS {m['team2']} ({o2}) | {m['tournament']} | ⏰ {m['time']}")
+            count += 1
+            print(f"\n   ═══ МАТЧ #{count} ═══")
+            print(f"   {m['team1']} VS {m['team2']}")
+            print(f"   🏆 {m['tournament']} | ⏰ {m['time']}")
+            print(f"   💰 Исход: П1={odds[0]} | X={odds[1]} | П2={odds[2]}")
+            
+            if odds[4]:
+                print(f"   📊 Тотал: ТБ={odds[4]} | ТМ={odds[5]}")
+            if odds[7]:
+                print(f"   📊 Фора: Ф1={odds[7]} | Ф2={odds[8]}")
+            
+            # AI-анализ
+            verdict = analyze_with_ai(m, odds)
+            if verdict:
+                print(f"   🤖 AI: {verdict[:300]}")
+                conn.execute(
+                    "INSERT INTO live_bets (team1, team2, tournament, status, match_time, odds1, odds2, odds_total, odds_total_over, odds_total_under, odds_fora1, odds_fora2, ai_verdict, confidence, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (m['team1'], m['team2'], m['tournament'], m['status'], m['time'],
+                     odds[0], odds[2], odds[3], odds[4], odds[5], odds[7], odds[8],
+                     verdict, 'СРЕДНЯЯ', now)
+                )
+            
+            if count >= 5:
+                break
         
         conn.commit()
         
-        # Статистика
-        total = conn.execute("SELECT COUNT(*) FROM live_bets").fetchone()[0]
-        today = conn.execute("SELECT COUNT(*) FROM live_bets WHERE updated LIKE ?", (datetime.now().strftime('%Y-%m-%d') + '%',)).fetchone()[0]
-        print(f"\n📊 В базе: {total} рекомендаций (сегодня: {today})")
-        print(f"⏳ Обновление через 60 сек...")
-        
-        time.sleep(60)
+        total_recs = conn.execute("SELECT COUNT(*) FROM live_bets").fetchone()[0]
+        print(f"\n📊 Всего рекомендаций в базе: {total_recs}")
+        print(f"⏳ Обновление через 120 сек...")
+        time.sleep(120)
 
 if __name__ == "__main__":
     main()
