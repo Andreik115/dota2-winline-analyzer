@@ -12,7 +12,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 DB_PATH = "data/dota2.db"
 
 class WinlineParser:
-    URL = "https://winline.ru/stavki/cybersport/dota-2"
+    URL = "https://winline.ru/stavki/sport/kibersport/dota_2"
     
     def __init__(self, headless=True):
         options = Options()
