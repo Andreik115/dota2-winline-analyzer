@@ -1,8 +1,5 @@
 # winline_parser.py
-import time
-import sqlite3
-import os
-import re
+import time, sqlite3, re
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -21,57 +18,84 @@ class WinlineParser:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-        
         self.driver = webdriver.Chrome(
             service=Service(ChromeDriverManager().install()),
             options=options
         )
     
-    def get_matches(self):
+    def parse(self):
         print("📡 Загружаю Winline...")
         self.driver.get(self.URL)
         time.sleep(5)
         
-        matches = []
+        events = self.driver.find_elements(By.CSS_SELECTOR, ".event-card")
+        print(f"   Найдено событий: {len(events)}")
         
-        # Ищем все кнопки/блоки с коэффициентами
-        # У Winline кэфы обычно в элементах с data-testid или class содержащим "outcome"
-        try:
-            # Ищем все элементы, которые могут содержать коэффициенты (числа)
-            elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), '.')]")
-            
-            odds_elements = []
-            for el in elements:
-                text = el.text.strip()
-                # Проверяем, похоже ли на коэффициент (число с точкой)
-                if re.match(r'^\d+\.\d{2}$', text):
-                    odds_elements.append(float(text))
-            
-            # Ищем названия команд (текст КАПСОМ или с заглавной)
-            team_elements = self.driver.find_elements(By.XPATH, 
-                "//*[contains(@class, 'team') or contains(@class, 'participant') or contains(@class, 'name')]")
-            
-            teams = []
-            for el in team_elements:
-                text = el.text.strip()
-                if text and len(text) > 3:
-                    teams.append(text)
-            
-            print(f"   Команд: {len(teams)}, Кэфов: {len(odds_elements)}")
-            
-            # Показываем что нашли
-            print("   Команды:", teams[:10])
-            print("   Кэфы:", odds_elements[:10])
-            
-        except Exception as e:
-            print(f"   Ошибка: {e}")
+        matches = []
+        for event in events:
+            try:
+                text = event.text
+                lines = [l.strip() for l in text.split('\n') if l.strip()]
+                
+                # Первые две строки — команды (если не начинаются с цифр)
+                team1, team2 = "", ""
+                odds = []
+                
+                for line in lines:
+                    # Проверяем коэффициент (число.двецифры)
+                    if re.match(r'^\d+\.\d{2}$', line):
+                        odds.append(float(line))
+                    elif not team1 and not line.startswith('+') and not line[0].isdigit():
+                        team1 = line
+                    elif team1 and not team2 and not line.startswith('+') and not line[0].isdigit():
+                        team2 = line
+                
+                if team1 and team2 and len(odds) >= 2:
+                    matches.append({
+                        'team1': team1,
+                        'team2': team2,
+                        'odds1': odds[0],  # П1
+                        'odds2': odds[2] if len(odds) >= 3 else odds[1]  # П2
+                    })
+                    print(f"   {team1} ({odds[0]}) vs {team2} ({odds[-1]})")
+            except:
+                pass
         
         return matches
+    
+    def update_db(self):
+        matches = self.parse()
+        
+        if not matches:
+            print("⚠️ Матчи не найдены")
+            return 0
+        
+        conn = sqlite3.connect(DB_PATH)
+        updated = 0
+        
+        for m in matches:
+            # Ищем матч по фрагментам названий
+            cursor = conn.execute(
+                "SELECT id FROM matches WHERE (team1_name LIKE ? OR team2_name LIKE ?) AND (team1_name LIKE ? OR team2_name LIKE ?)",
+                (f"%{m['team1']}%", f"%{m['team1']}%", f"%{m['team2']}%", f"%{m['team2']}%")
+            )
+            row = cursor.fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE matches SET team1_odds=?, team2_odds=? WHERE id=?",
+                    (m['odds1'], m['odds2'], row[0])
+                )
+                updated += 1
+        
+        conn.commit()
+        conn.close()
+        print(f"✅ Обновлено коэффициентов: {updated}")
+        return updated
     
     def close(self):
         self.driver.quit()
 
 if __name__ == "__main__":
     parser = WinlineParser(headless=True)
-    parser.get_matches()
+    parser.update_db()
     parser.close()
