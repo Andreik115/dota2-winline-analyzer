@@ -42,7 +42,7 @@ async def home():
                 </div>
                 {odds_display}
                 <div style="color:#64748b;font-size:13px;text-align:center;margin-top:5px;">{m.tournament or ''}</div>
-                <a href="/match/{m.id}" style="display:block;margin-top:12px;padding:10px;background:#3b82f6;color:white;text-align:center;text-decoration:none;border-radius:8px;">🤖 AI-анализ →</a>
+                <a href="/match/{m.id}" style="display:block;margin-top:12px;padding:10px;background:#3b82f6;color:white;text-align:center;text-decoration:none;border-radius:8px;">📊 Прематч-анализ →</a>
             </div>
             """
     else:
@@ -68,7 +68,7 @@ async def home():
             <div class="container">
                 <a href="/" class="logo">🎮 Dota2 Analyzer</a>
                 <nav class="nav-links">
-                    <a href="/">Матчи</a>
+                    <a href="/">📊 Матчи</a>
                     <a href="/recommendations">🤖 AI Рекомендации</a>
                     <a href="/live">🔴 LIVE</a>
                 </nav>
@@ -76,8 +76,8 @@ async def home():
         </header>
         <main class="container">
             <h1 style="font-size:32px;margin-bottom:8px;">🎮 Анализ матчей Dota 2</h1>
-            <p style="color:#94a3b8;margin-bottom:32px;">AI-прогнозы от GigaChat с коэффициентами Winline</p>
-            <h2 style="font-size:24px;margin-bottom:16px;">📊 Матчи</h2>
+            <p style="color:#94a3b8;margin-bottom:32px;">AI-прогнозы от GigaChat | Прематч + Лайв | Коэффициенты Winline</p>
+            <h2 style="font-size:24px;margin-bottom:16px;">📊 Матчи с коэффициентами</h2>
             {matches_html}
         </main>
         <footer>
@@ -104,12 +104,13 @@ async def match_detail(match_id: int):
             <span style="background:#334155;padding:8px 20px;border-radius:8px;font-size:18px;font-weight:600;">П2: {match.team2_odds}</span>
         </div>"""
     
-    ai_text = analyzer.analyze_match(
+    # Прематч-анализ
+    ai_text = analyzer.prematch_analysis(
         match.team1_name,
         match.team2_name,
         match.team1_odds,
         match.team2_odds,
-        match.tournament or ""
+        tournament=match.tournament or ""
     )
     ai_text = ai_text.replace('\n', '<br>')
     
@@ -128,7 +129,7 @@ async def match_detail(match_id: int):
             <div class="container">
                 <a href="/" class="logo">🎮 Dota2 Analyzer</a>
                 <nav class="nav-links">
-                    <a href="/">Матчи</a>
+                    <a href="/">📊 Матчи</a>
                     <a href="/recommendations">🤖 AI Рекомендации</a>
                     <a href="/live">🔴 LIVE</a>
                 </nav>
@@ -148,11 +149,11 @@ async def match_detail(match_id: int):
                     </div>
                 </div>
                 {odds_display}
-                <div style="text-align:center;color:#64748b;margin-top:8px;">{match.tournament or ''}</div>
+                <div style="text-align:center;color:#94a3b8;margin-top:8px;">🏆 {match.tournament or ''}</div>
             </div>
             
             <div class="card" style="background:linear-gradient(135deg,#1e1b4b,#1e293b);">
-                <h3 style="margin-bottom:16px;">🤖 AI-анализ от GigaChat</h3>
+                <h3 style="margin-bottom:16px;">📊 ПРЕМАТЧ-АНАЛИЗ от GigaChat</h3>
                 <div style="color:#cbd5e1;line-height:1.8;font-size:15px;">{ai_text}</div>
             </div>
         </main>
@@ -180,7 +181,7 @@ async def recommendations():
         </head>
         <body>
         <header><div class="container"><a href="/" class="logo">🎮 Dota2 Analyzer</a>
-        <nav class="nav-links"><a href="/">Матчи</a><a href="/recommendations">🤖 AI Рекомендации</a><a href="/live">🔴 LIVE</a></nav>
+        <nav class="nav-links"><a href="/">📊 Матчи</a><a href="/recommendations">🤖 AI Рекомендации</a><a href="/live">🔴 LIVE</a></nav>
         </div></header>
         <main class="container">
         <a href="/" style="color:#3b82f6;">← Назад</a>
@@ -212,7 +213,7 @@ async def recommendations():
     </head>
     <body>
     <header><div class="container"><a href="/" class="logo">🎮 Dota2 Analyzer</a>
-    <nav class="nav-links"><a href="/">Матчи</a><a href="/recommendations">🤖 AI Рекомендации</a><a href="/live">🔴 LIVE</a></nav>
+    <nav class="nav-links"><a href="/">📊 Матчи</a><a href="/recommendations">🤖 AI Рекомендации</a><a href="/live">🔴 LIVE</a></nav>
     </div></header>
     <main class="container">
     <a href="/" style="color:#3b82f6;">← Назад</a>
@@ -228,7 +229,6 @@ async def live_page():
         "SELECT DISTINCT team1, team2, tournament, match_time FROM live_matches WHERE status='LIVE' ORDER BY id DESC LIMIT 20"
     ).fetchall()
     
-    # Статистика
     total_live = conn.execute("SELECT COUNT(DISTINCT team1||team2) FROM live_matches WHERE status='LIVE'").fetchone()[0]
     total_recs = conn.execute("SELECT COUNT(*) FROM ai_recommendations").fetchone()[0]
     conn.close()
@@ -236,18 +236,30 @@ async def live_page():
     live_html = ""
     if live:
         for m in live:
+            # Лайв-анализ
+            try:
+                live_ai = analyzer.live_analysis(
+                    m[0], m[1], m[3] or "Идёт", m[2]
+                )
+                live_ai = live_ai.replace('\n', '<br>')
+            except:
+                live_ai = "AI-анализ недоступен"
+            
             live_html += f"""
             <div class="card" style="margin:10px 0;border-left:3px solid #ef4444;">
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
-                    <span style="color:#ef4444;font-weight:700;">🔴 LIVE</span>
-                    <span style="color:#94a3b8;font-size:13px;">⏱️ {m[3] or 'Идёт'}</span>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                    <span style="color:#ef4444;font-weight:700;font-size:16px;">🔴 LIVE</span>
+                    <span style="color:#94a3b8;">⏱️ {m[3] or 'Идёт'}</span>
                 </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span style="font-weight:600;font-size:16px;">{m[0]}</span>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <span style="font-weight:600;font-size:18px;">{m[0]}</span>
                     <span style="font-weight:700;color:#64748b;">VS</span>
-                    <span style="font-weight:600;font-size:16px;">{m[1]}</span>
+                    <span style="font-weight:600;font-size:18px;">{m[1]}</span>
                 </div>
-                <div style="color:#94a3b8;font-size:13px;margin-top:5px;">🏆 {m[2]}</div>
+                <div style="color:#94a3b8;font-size:13px;margin-bottom:10px;">🏆 {m[2]}</div>
+                <div style="background:linear-gradient(135deg,#1e1b4b,#1e293b);padding:12px;border-radius:8px;color:#cbd5e1;font-size:13px;line-height:1.6;">
+                    🤖 {live_ai}
+                </div>
             </div>"""
     else:
         live_html = """
@@ -265,7 +277,7 @@ async def live_page():
     </head>
     <body>
     <header><div class="container"><a href="/" class="logo">🎮 Dota2 Analyzer</a>
-    <nav class="nav-links"><a href="/">Матчи</a><a href="/recommendations">🤖 AI Рекомендации</a><a href="/live">🔴 LIVE</a></nav>
+    <nav class="nav-links"><a href="/">📊 Матчи</a><a href="/recommendations">🤖 AI Рекомендации</a><a href="/live">🔴 LIVE</a></nav>
     </div></header>
     <main class="container">
     <a href="/" style="color:#3b82f6;">← Назад</a>
