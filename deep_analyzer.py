@@ -7,6 +7,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from src.ai.gigachat_analyzer import analyzer
+from gigachat.models import Chat, Messages, MessagesRole
 
 DB = "data/dota2.db"
 LIQUI_URL = "https://liquipedia.net/dota2/Liquipedia:Upcoming_and_ongoing_matches"
@@ -49,19 +50,16 @@ def parse_liquipedia():
     return matches
 
 def get_team_recent_form(team_name, conn):
-    """Последние 5 матчей команды из нашей базы"""
     rows = conn.execute(
         "SELECT opponent, result, score, tournament FROM team_results WHERE team_name LIKE ? LIMIT 5",
         (f"%{team_name}%",)
     ).fetchall()
-    
     if rows:
         wins = sum(1 for r in rows if r[1] == 'W')
         return rows, wins
     return [], 0
 
 def find_head_to_head(team1, team2, conn):
-    """Ищет личные встречи в базе"""
     rows = conn.execute(
         "SELECT team1, team2, score1, score2, winner FROM match_results WHERE (team1 LIKE ? AND team2 LIKE ?) OR (team1 LIKE ? AND team2 LIKE ?) LIMIT 10",
         (f"%{team1}%", f"%{team2}%", f"%{team2}%", f"%{team1}%")
@@ -69,7 +67,6 @@ def find_head_to_head(team1, team2, conn):
     return rows
 
 def get_odds(team1, team2, conn):
-    """Кэффициенты Winline"""
     row = conn.execute(
         "SELECT team1_odds, team2_odds FROM matches WHERE team1_name LIKE ? AND team2_name LIKE ? AND team1_odds IS NOT NULL",
         (f"%{team1}%", f"%{team2}%")
@@ -83,16 +80,13 @@ def get_odds(team1, team2, conn):
     return row
 
 def deep_analysis(match, conn):
-    """Полный анализ матча"""
     team1, team2 = match['team1'], match['team2']
     
-    # Собираем все данные
     odds = get_odds(team1, team2, conn)
     h2h = find_head_to_head(team1, team2, conn)
     form1, wins1 = get_team_recent_form(team1, conn)
     form2, wins2 = get_team_recent_form(team2, conn)
     
-    # Формируем контекст для AI
     context = f"""
 === ИСТОРИЯ ЛИЧНЫХ ВСТРЕЧ ===
 {chr(10).join([f'{r[0]} {r[2]}:{r[3]} {r[1]} | {r[4]}' for r in h2h]) if h2h else 'Нет данных'}
@@ -182,7 +176,7 @@ def main():
             analyzed += 1
         
         print(f"\n✅ Проанализировано: {analyzed}")
-        time.sleep(300)  # Каждые 5 минут
+        time.sleep(300)
 
 if __name__ == "__main__":
     main()
