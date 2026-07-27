@@ -1,4 +1,3 @@
-# liqui_live_working.py
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -23,36 +22,34 @@ def parse():
     text = driver.find_element(By.TAG_NAME, "body").text
     driver.quit()
     
-    lines = text.split('\n')
+    lines = [l.strip() for l in text.split('\n') if l.strip()]
     matches = []
-    i = 0
     
-    while i < len(lines) - 5:
-        # Ищем структуру: Команда1 \n vs \n (Bo3) \n Команда2 \n Турнир \n LIVE
-        if lines[i+1].strip().lower() == 'vs' and lines[i+4].strip() == 'LIVE':
-            team1 = lines[i].strip()
-            team2 = lines[i+3].strip()
-            tournament = lines[i+4].strip()  # Это LIVE, турнир выше
-            # Ищем турнир
-            tournament = lines[i+5].strip() if i+5 < len(lines) and 'LIVE' not in lines[i+5] else ""
-            
-            # Ищем время
-            time_str = ""
-            for j in range(i+6, min(i+12, len(lines))):
-                m = re.search(r'(\d+m\s*\d*s|\d+m)', lines[j])
-                if m:
-                    time_str = m.group(1)
-                    break
-            
-            matches.append({
-                'team1': team1,
-                'team2': team2,
-                'tournament': tournament,
-                'time': time_str
-            })
-            i += 8
-        else:
-            i += 1
+    for i, line in enumerate(lines):
+        if line == 'LIVE' and i >= 2 and i < len(lines) - 2:
+            # Ищем "Команда1 vs Команда2" перед LIVE
+            # Структура: Команда1 \n vs \n (Bo3) \n Команда2 \n Турнир \n LIVE
+            if i >= 4:
+                team1 = lines[i-4]
+                team2 = lines[i-1]
+                vs_check = lines[i-3]
+                
+                if vs_check.lower() == 'vs' and team1 != 'LIVE' and team2 != 'LIVE':
+                    tournament = lines[i+1] if i+1 < len(lines) else ""
+                    
+                    time_str = ""
+                    for j in range(i+2, min(i+8, len(lines))):
+                        m = re.search(r'(\d+m\s*\d*s|\d+m)', lines[j])
+                        if m:
+                            time_str = m.group(1)
+                            break
+                    
+                    matches.append({
+                        'team1': team1,
+                        'team2': team2,
+                        'tournament': tournament,
+                        'time': time_str
+                    })
     
     return matches
 
@@ -71,6 +68,9 @@ def main():
         print(f"🔴 LIVE-МАТЧЕЙ: {len(matches)}")
         for m in matches:
             print(f"   {m['team1']} VS {m['team2']} | {m['tournament']} | ⏱️ {m['time']}")
+        
+        if not matches:
+            print("   Нет активных матчей")
         
         time.sleep(30)
 
