@@ -1,10 +1,11 @@
-import sqlite3, time, re
-from datetime import datetime
+# liqui_live_final.py
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
+import sqlite3, time, re
+from datetime import datetime
 
 DB = "data/dota2.db"
 URL = "https://liquipedia.net/dota2/Liquipedia:Upcoming_and_ongoing_matches"
@@ -22,51 +23,48 @@ def create_table():
     conn.commit()
     return conn
 
-def parse_live():
+def get_driver():
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=options
-    )
-    
-    driver.get(URL)
-    time.sleep(5)
-    
-    body = driver.find_element(By.TAG_NAME, "body").text
-    driver.quit()
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
+def parse():
+    driver = get_driver()
+    try:
+        driver.get(URL)
+        time.sleep(5)
+        text = driver.find_element(By.TAG_NAME, "body").text
+    finally:
+        driver.quit()
     
     matches = []
-    lines = [l.strip() for l in body.split('\n') if l.strip()]
+    lines = text.split('\n')
     
-    i = 0
-    while i < len(lines) - 3:
-        if lines[i] == 'LIVE' and i >= 2 and i < len(lines) - 2:
-            team1 = lines[i-2] if i >= 2 else ""
-            vs_check = lines[i-1] if i >= 1 else ""
-            team2 = lines[i+1] if i+1 < len(lines) else ""
-            tournament = lines[i+2] if i+2 < len(lines) else ""
+    for i, line in enumerate(lines):
+        if line.strip() == 'LIVE' and i >= 2 and i+2 < len(lines):
+            team1 = lines[i-2].strip()
+            vs_line = lines[i-1].strip()
+            team2 = lines[i+1].strip()
+            tournament = lines[i+2].strip() if i+2 < len(lines) else ""
             
-            if vs_check.lower() == 'vs' and team1 and team2:
-                time_str = ""
-                for j in range(i+3, min(i+8, len(lines))):
-                    tm = re.search(r'(\d+m\s*\d*s|\d+m)', lines[j])
-                    if tm:
-                        time_str = tm.group(1)
-                        break
-                
+            # Ищем время матча (например "23m 52s")
+            time_str = ""
+            for j in range(i+3, min(i+8, len(lines))):
+                m = re.search(r'(\d{1,2}m\s*\d{1,2}s|\d{1,2}m)', lines[j])
+                if m:
+                    time_str = m.group(1)
+                    break
+            
+            if vs_line.lower() in ['vs', '(bo3)', '(bo5)'] or 'vs' in vs_line.lower():
                 matches.append({
                     'team1': team1,
                     'team2': team2,
                     'tournament': tournament,
                     'time': time_str
                 })
-                i += 5
-                continue
-        i += 1
     
     return matches
 
@@ -75,25 +73,23 @@ def main():
     
     while True:
         now = datetime.now().strftime('%H:%M:%S')
-        print(f"\n[{now}] 📡 Парсинг live-матчей...")
+        print(f"[{now}] 📡 Парсинг...")
         
         try:
-            matches = parse_live()
+            matches = parse()
         except Exception as e:
-            print(f"❌ Ошибка: {e}")
-            matches = []
+            print(f"❌ {e}")
+            time.sleep(30)
+            continue
         
-        print(f"🔴 Найдено: {len(matches)}")
-        
+        print(f"🔴 LIVE: {len(matches)}")
         for m in matches:
             print(f"   {m['team1']} VS {m['team2']} | {m['tournament']} | {m['time']}")
             conn.execute(
-                "INSERT INTO live_matches (team1, team2, tournament, status, match_time, updated) VALUES (?, ?, ?, 'LIVE', ?, ?)",
+                "INSERT OR IGNORE INTO live_matches (team1, team2, tournament, status, match_time, updated) VALUES (?, ?, ?, 'LIVE', ?, ?)",
                 (m['team1'], m['team2'], m['tournament'], m['time'], now)
             )
-        
         conn.commit()
-        print(f"⏳ Обновление через 30 сек...")
         time.sleep(30)
 
 if __name__ == "__main__":
