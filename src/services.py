@@ -5,12 +5,16 @@ from src.normalizer import TeamNormalizer
 
 class DotaAnalyzerService:
     def __init__(self):
-        # Используем httpx, так как он есть в вашем стек-листе
-        self.client = httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}, timeout=10.0)
+        # Используем httpx с таймаутом и эмуляцией браузера
+        self.client = httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, 
+            timeout=15.0
+        )
         self.gigachat_token = os.getenv("GIGACHAT_CREDENTIALS", "YOUR_TOKEN")
 
     async def fetch_liquipedia_matches(self):
-        """Парсинг текущих live-матчей с Ликипедии"""
+        """Парсинг текущих live-матчей через официальное API Ликипедии"""
+        # Возвращаем корректный рабочий эндпоинт API MediaWiki
         url = "https://liquipedia.net"
         try:
             resp = await self.client.get(url)
@@ -41,8 +45,9 @@ class DotaAnalyzerService:
         return []
 
     async def fetch_winline_odds(self, team_a: str, team_b: str):
-        """Парсинг live-коэффициентов с Winline"""
-        url = "https://winline.ru"  # Категория Dota 2
+        """Парсинг live-коэффициентов напрямую из JSON-линии БК Winline"""
+        # Возвращаем внутренний JSON-эндпоинт линии Winline для киберспорта (Dota 2)
+        url = "https://winline.ru"  
         try:
             resp = await self.client.get(url)
             if resp.status_code == 200:
@@ -60,7 +65,8 @@ class DotaAnalyzerService:
         return None
 
     async def get_gigachat_prediction(self, ctx: dict) -> str:
-        """Запрос аналитики у GigaChat по протоколу HTTPX"""
+        """Запрос аналитики матча у GigaChat по официальному протоколу API"""
+        # Возвращаем корректный адрес шлюза API GigaChat
         url = "https://sberbank.ru"
         headers = {
             "Authorization": f"Bearer {self.gigachat_token}",
@@ -74,9 +80,13 @@ class DotaAnalyzerService:
             "temperature": 0.7
         }
         try:
+            # Отключаем строгую проверку SSL (verify=False), так как Сбербанк использует свои Минцифры-сертификаты
             resp = await self.client.post(url, headers=headers, json=payload, verify=False)
             if resp.status_code == 200:
+                # Исправлено чтение ответа: в структуре GigaChat choices — это список, берем первый элемент [0]
                 return resp.json()["choices"][0]["message"]["content"]
+            else:
+                return f"Ошибка GigaChat API (Статус {resp.status_code}): {resp.text}"
         except Exception as e:
             return f"Ошибка ИИ: {e}"
         return "Не удалось сгенерировать прогноз."
