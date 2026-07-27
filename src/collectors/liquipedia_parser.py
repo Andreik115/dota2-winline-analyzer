@@ -1,35 +1,54 @@
 import aiohttp
 from bs4 import BeautifulSoup
+from src.utils.normalizer import TeamNormalizer
 
-class LiquipediaLiveParser:
-    # Liquipedia требует указывать корректный User-Agent, иначе заблокирует
-    HEADERS = {"User-Agent": "Dota2WinlineAnalyzer/1.0 (contact@yourdomain.com)"}
-    URL = "https://liquipedia.net"
+class LiquipediaParser:
+    API_URL = "https://liquipedia.net"
+    HEADERS = {
+        "User-Agent": "Dota2WinlineAnalyzer/2.0 (your_email@example.com)",
+        "Accept-Encoding": "gzip"
+    }
 
-    async def get_live_matches(self):
+    async def fetch_live_matches(self):
+        """Сканирует главную страницу через API парсинга секций для поиска Live-игр"""
+        params = {
+            "action": "parse",
+            "page": "Main_Page",
+            "format": "json",
+            "prop": "text"
+        }
         async with aiohttp.ClientSession(headers=self.HEADERS) as session:
-            async with session.get(self.URL) as response:
-                if response.status != 200:
+            async with session.get(self.API_URL, params=params) as resp:
+                if resp.status != 200:
                     return []
+                data = await resp.json()
+                html = data.get("parse", {}).get("text", {}).get("*", "")
                 
-                html = await response.text()
                 soup = BeautifulSoup(html, 'lxml')
-                live_matches = []
+                matches = []
                 
-                # Ищем блоки матчей в панели "Matches" на главной странице
-                match_tables = soup.select('.infobox-matches')
-                for table in match_tables:
-                    # Проверяем, идет ли матч прямо сейчас (класс 'live')
-                    is_live = table.select_one('.live')
-                    if is_live:
-                        team_left = table.select_one('.team-left a').get_text(strip=True)
-                        team_right = table.select_one('.team-right a').get_text(strip=True)
-                        tournament = table.select_one('.league-icon-small a').get('title', 'Unknown')
+                # Селектор блоков текущих матчей на Liquipedia
+                match_boxes = soup.select('.infobox-matches')
+                for box in match_boxes:
+                    is_live = box.select_one('.live') or box.select_one('.match-countdown .live')
+                    if not is_live:
+                        continue
                         
-                        live_matches.append({
-                            "team_a": team_left,
-                            "team_b": team_right,
-                            "tournament": tournament,
-                            "status": "LIVE"
+                    t_left = box.select_one('.team-left a')
+                    t_right = box.select_one('.team-right a')
+                    tournament_node = box.select_one('.league-icon-small a')
+                    
+                    if t_left and t_right:
+                        team_a = t_left.get_text(strip=True)
+                        team_b = t_right.get_text(strip=True)
+                        match_id = f"{TeamNormalizer.normalize(team_a)}_{TeamNormalizer.normalize(team_b)}"
+                        
+                        matches.append({
+                            "liquipedia_id": match_id,
+                            "team_a": team_a,
+                            "team_b": team_b,
+                            "tournament": tournament_node.get('title', 'Unknown') if tournament_node else 'Unknown',
+                            "picks_a": [], # Герои парсятся со страницы матча, если драфт начался
+                            "picks_b": []
                         })
-                return live_matches
+                return matches
