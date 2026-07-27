@@ -3,10 +3,11 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
-import time, re
+import sqlite3, time, re
 from datetime import datetime
 
 URL = "https://liquipedia.net/dota2/Liquipedia:Upcoming_and_ongoing_matches"
+DB = "data/dota2.db"
 
 def get_driver():
     options = Options()
@@ -23,48 +24,32 @@ def parse():
     driver.quit()
     
     matches = []
-    i = 18  # Пропускаем меню
-    
+    i = 18
     while i < len(lines) - 5:
-        # Ищем паттерн: team1 \n vs \n (Bo3) \n team2 \n турнир \n статус
         if lines[i+1] == 'vs' and lines[i+2].startswith('(Bo'):
-            team1 = lines[i]
-            team2 = lines[i+3]
+            team1, team2 = lines[i], lines[i+3]
             tournament = lines[i+4]
-            status = lines[i+5]
+            status_line = lines[i+5]
             
-            # Определяем время
-            time_str = ""
-            if re.match(r'\d+m', status):
-                time_str = status
-                status = "LIVE"
-            elif status == 'LIVE':
-                # Время может быть дальше
-                if i+6 < len(lines) and re.match(r'\d+m', lines[i+6]):
-                    time_str = lines[i+6]
-            else:
-                time_str = status
-                status = "UPCOMING"
+            status = "LIVE" if status_line == 'LIVE' or re.match(r'\d+m', status_line) else "UPCOMING"
+            time_str = status_line if re.match(r'\d+m', status_line) else ""
+            if not time_str and i+6 < len(lines) and re.match(r'\d+m', lines[i+6]):
+                time_str = lines[i+6]
             
             matches.append({
-                'team1': team1,
-                'team2': team2,
+                'team1': team1, 'team2': team2,
                 'tournament': tournament,
-                'status': status,
-                'time': time_str
+                'status': status, 'time': time_str
             })
             i += 6
         else:
             i += 1
-    
     return matches
 
 def main():
     while True:
         now = datetime.now().strftime('%H:%M:%S')
-        print(f"\n{'='*50}")
-        print(f"[{now}] 📡 Парсинг Liquipedia")
-        print(f"{'='*50}")
+        print(f"\n[20:56:31] 📡 Парсинг Liquipedia")
         
         try:
             matches = parse()
@@ -76,15 +61,23 @@ def main():
         live = [m for m in matches if m['status'] == 'LIVE']
         upcoming = [m for m in matches if m['status'] == 'UPCOMING']
         
-        print(f"\n🔴 LIVE ({len(live)}):")
+        print(f"🔴 LIVE: {len(live)}")
         for m in live:
             print(f"   {m['team1']} VS {m['team2']} | {m['tournament']} | ⏱️ {m['time']}")
         
-        print(f"\n⏳ Предстоящие ({len(upcoming)}):")
-        for m in upcoming:
-            print(f"   {m['team1']} VS {m['team2']} | {m['tournament']} | ⏰ {m['time']}")
+        # СОХРАНЯЕМ В БАЗУ
+        conn = sqlite3.connect(DB)
+        conn.execute("DELETE FROM live_matches")
+        for m in matches:
+            conn.execute(
+                "INSERT INTO live_matches (team1, team2, tournament, status, match_time, updated) VALUES (?, ?, ?, ?, ?, ?)",
+                (m['team1'], m['team2'], m['tournament'], m['status'], m['time'], now)
+            )
+        conn.commit()
+        conn.close()
+        print(f"💾 Сохранено в базу: {len(matches)} матчей")
         
-        print(f"\n⏳ Обновление через 30 сек...")
+        print(f"⏳ Обновление через 30 сек...")
         time.sleep(30)
 
 if __name__ == "__main__":
