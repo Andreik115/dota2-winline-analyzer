@@ -18,7 +18,7 @@ app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def home():
     session = get_session()
-    matches = session.query(Match).order_by(Match.start_time.desc()).limit(20).all()
+    matches = session.query(Match).order_by(Match.id.desc()).limit(50).all()
     session.close()
     
     matches_html = ""
