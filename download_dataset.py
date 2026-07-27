@@ -30,7 +30,7 @@ def fetch_match(match_id):
         r = requests.get(url, timeout=15)
         if r.status_code == 200:
             data = r.json()
-            if data.get("picks") and data.get("radiant_gold_adv"):
+            if data.get("picks"):
                 return data
     except:
         pass
@@ -62,73 +62,47 @@ def main():
     conn = create_table()
     added = 0
     target = 500
+    page = 0
     
-    # Этап 1: Про-матчи
     print("=" * 50)
-    print("📡 Этап 1: Про-матчи")
+    print("📡 Скачиваю паблик-матчи высокого MMR")
     print("=" * 50)
     
-    r = requests.get("https://api.opendota.com/api/proMatches")
-    pro_ids = [m["match_id"] for m in r.json()[:300]]
-    print(f"   Будем пробовать {len(pro_ids)} матчей\n")
-    
-    for i, mid in enumerate(pro_ids):
-        if added >= target:
+    while added < target and page < 20:
+        url = f"https://api.opendota.com/api/publicMatches?mmr_descending=1&offset={page*100}"
+        r = requests.get(url)
+        matches = r.json()
+        
+        if not matches:
+            print(f"   Страница {page+1}: пусто, конец")
             break
         
-        exists = conn.execute("SELECT 1 FROM match_details WHERE match_id=?", (mid,)).fetchone()
-        if exists:
-            continue
+        print(f"\n   Страница {page+1}: {len(matches)} матчей")
         
-        print(f"   [{i+1}/{len(pro_ids)}] Про-матч {mid}...", end=" ")
-        data = fetch_match(mid)
-        
-        if data:
-            save_match(conn, data, mid)
-            added += 1
-            print(f"✅ (всего: {added})")
-        else:
-            print("❌")
-        
-        time.sleep(0.15)
-    
-    # Этап 2: Паблик-матчи высокого MMR
-    if added < target:
-        print(f"\n{'=' * 50}")
-        print(f"📡 Этап 2: Паблик-матчи (high MMR)")
-        print(f"{'=' * 50}\n")
-        
-        for page in range(5):
+        for m in matches:
             if added >= target:
                 break
-            r = requests.get(f"https://api.opendota.com/api/publicMatches?mmr_descending=1&offset={page*100}")
-            pub_matches = r.json()
             
-            for i, m in enumerate(pub_matches):
-                if added >= target:
-                    break
-                
-                mid = m["match_id"]
-                exists = conn.execute("SELECT 1 FROM match_details WHERE match_id=?", (mid,)).fetchone()
-                if exists:
-                    continue
-                
-                print(f"   [Стр.{page+1}] Паблик {mid}...", end=" ")
-                data = fetch_match(mid)
-                
-                if data:
-                    save_match(conn, data, mid)
-                    added += 1
-                    print(f"✅ (всего: {added})")
-                else:
-                    print("❌")
-                
-                time.sleep(0.1)
+            mid = m["match_id"]
+            exists = conn.execute("SELECT 1 FROM match_details WHERE match_id=?", (mid,)).fetchone()
+            if exists:
+                continue
+            
+            data = fetch_match(mid)
+            if data:
+                save_match(conn, data, mid)
+                added += 1
+                print(f"      ✅ {added}/{target} — матч {mid}")
+            else:
+                print(f"      ❌ матч {mid}")
+            
+            time.sleep(0.1)
+        
+        page += 1
     
     conn.close()
     print(f"\n{'=' * 50}")
     print(f"✅ ГОТОВО! Скачано {added} матчей")
-    print(f"   Файл: {DB_PATH}")
     print(f"{'=' * 50}")
 
 if __name__ == "__main__":
